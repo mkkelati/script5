@@ -1,7 +1,7 @@
 #!/bin/bash
 # MK Script Manager v4.1 - Advanced SSH Management System with Cloud Integration
 # Compatible with Ubuntu 20.04 - 24.04 LTS
-# Repository: https://github.com/mkkelati/script4
+# Repository: https://github.com/mkkelati/script5
 # Enhanced with SSH Key Detection and HTTP Injector Support
 
 # Configuration

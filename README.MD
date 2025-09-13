@@ -32,7 +32,7 @@ Advanced SSH user management system with cloud integration, HTTP Injector suppor
 
 ### ⚡ One-Line Installation
 ```bash
-sudo apt-get update -y && sudo apt-get install -y wget && wget -O install.sh https://raw.githubusercontent.com/mkkelati/script4/main/install.sh && sudo bash install.sh
+sudo apt-get update -y && sudo apt-get install -y wget && wget -O install.sh https://raw.githubusercontent.com/mkkelati/script5/main/install.sh && sudo bash install.sh
 ```
 
 ### 🎯 What Gets Installed
@@ -161,7 +161,7 @@ admin 5                  # Allows 5 connections
 ```
 
 ## ⚙️ Technical Notes
-- Uses **main branch** from `github.com/mkkelati/script4`
+- Uses **main branch** from `github.com/mkkelati/script5`
 - **TLS cipher**: `TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256`
 - **SSL tunnel**: Port 443 → SSH port 22
 - **User limits**: Stored in `/etc/security/limits.d/`
@@ -259,7 +259,7 @@ done
 
 ## 🔄 Updates & Support
 
-- **Repository**: [https://github.com/mkkelati/script4](https://github.com/mkkelati/script4)
+- **Repository**: [https://github.com/mkkelati/script5](https://github.com/mkkelati/script5)
 - **Issues**: Report bugs and feature requests
 - **Releases**: Check for updates and new features
 

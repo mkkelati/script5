@@ -181,7 +181,7 @@ INSTALL_DIR="/usr/local/bin"
 
 # Always download the latest version from GitHub for consistency
 echo "[*] Downloading menu script..."
-if wget -q https://raw.githubusercontent.com/mkkelati/script4/main/menu.sh -O "${INSTALL_DIR}/menu"; then
+if wget -q https://raw.githubusercontent.com/mkkelati/script5/main/menu.sh -O "${INSTALL_DIR}/menu"; then
   chmod +x "${INSTALL_DIR}/menu"
   echo "[*] Menu system installed successfully"
 else
@@ -241,7 +241,7 @@ if [[ -x "${INSTALL_DIR}/menu" ]]; then
   echo -e "\033[1;34m║\033[1;32m    Then enjoy the professional dashboard and 11 powerful options!          \033[1;34m║\033[0m"
   echo -e "\033[1;34m║\033[1;36m                                                                              \033[1;34m║\033[0m"
   echo -e "\033[1;34m╠══════════════════════════════════════════════════════════════════════════════╣\033[0m"
-  echo -e "\033[1;34m║\033[1;35m 💡 SUPPORT: \033[1;37mhttps://github.com/mkkelati/script4                           \033[1;34m║\033[0m"
+  echo -e "\033[1;34m║\033[1;35m 💡 SUPPORT: \033[1;37mhttps://github.com/mkkelati/script5                           \033[1;34m║\033[0m"
   echo -e "\033[1;34m║\033[1;35m 📧 VERSION: \033[1;37mv4.1 - Maximum Performance Edition                            \033[1;34m║\033[0m"
   echo -e "\033[1;34m║\033[1;35m 🌟 STATUS:  \033[1;32mFully Optimized & Ready for Production                        \033[1;34m║\033[0m"
   echo -e "\033[1;34m╚══════════════════════════════════════════════════════════════════════════════╝\033[0m"
