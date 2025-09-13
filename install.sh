@@ -151,26 +151,100 @@ systemctl restart stunnel4
 systemctl enable stunnel4
 
 echo "[*] Configuring SSH for password authentication..."
-# Enable SSH password authentication for HTTP Injector compatibility
-if ! grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config; then
-    # Check if PasswordAuthentication is set to no and change it
-    if grep -q "^PasswordAuthentication no" /etc/ssh/sshd_config; then
-        sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
-        echo "[*] Changed PasswordAuthentication from no to yes"
-    elif grep -q "^#PasswordAuthentication" /etc/ssh/sshd_config; then
-        sed -i 's/^#PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
-        echo "[*] Uncommented and enabled PasswordAuthentication"
-    else
-        # Add PasswordAuthentication yes if not present
-        echo "PasswordAuthentication yes" >> /etc/ssh/sshd_config
-        echo "[*] Added PasswordAuthentication yes to SSH config"
+
+# Function to check if PasswordAuthentication is enabled anywhere
+check_password_auth() {
+    # Check main config file
+    if grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config 2>/dev/null; then
+        return 0
     fi
     
-    # Restart SSH service to apply changes
-    systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || service ssh restart 2>/dev/null
-    echo "[*] SSH service restarted with password authentication enabled"
-else
+    # Check all config.d files
+    if find /etc/ssh/sshd_config.d/ -name "*.conf" -exec grep -l "^PasswordAuthentication yes" {} \; 2>/dev/null | grep -q .; then
+        return 0
+    fi
+    
+    return 1
+}
+
+# Function to disable PasswordAuthentication in all locations
+disable_password_auth_everywhere() {
+    # Disable in main config
+    sed -i 's/^PasswordAuthentication no/#PasswordAuthentication no/' /etc/ssh/sshd_config 2>/dev/null
+    sed -i 's/^PasswordAuthentication yes/#PasswordAuthentication yes/' /etc/ssh/sshd_config 2>/dev/null
+    
+    # Disable in all config.d files
+    find /etc/ssh/sshd_config.d/ -name "*.conf" -exec sed -i 's/^PasswordAuthentication.*/#&/' {} \; 2>/dev/null
+}
+
+# Check current status
+if check_password_auth; then
     echo "[*] SSH password authentication already enabled"
+else
+    echo "[*] Enabling SSH password authentication for HTTP Injector compatibility..."
+    
+    # Show current SSH config status
+    echo "[*] Checking SSH configuration files..."
+    
+    # Check main config
+    if grep -q "PasswordAuthentication" /etc/ssh/sshd_config 2>/dev/null; then
+        echo "[*] Found PasswordAuthentication in main config: $(grep PasswordAuthentication /etc/ssh/sshd_config)"
+    fi
+    
+    # Check config.d directory
+    if [ -d "/etc/ssh/sshd_config.d/" ]; then
+        echo "[*] Checking /etc/ssh/sshd_config.d/ files..."
+        find /etc/ssh/sshd_config.d/ -name "*.conf" -exec echo "[*] Checking: {}" \; -exec grep -H "PasswordAuthentication" {} \; 2>/dev/null || echo "[*] No PasswordAuthentication found in config.d files"
+    fi
+    
+    # Disable all existing PasswordAuthentication settings to avoid conflicts
+    disable_password_auth_everywhere
+    
+    # Create our own config file with highest priority
+    echo "[*] Creating MK Script SSH configuration..."
+    cat > /etc/ssh/sshd_config.d/99-mk-script.conf << 'EOF'
+# MK Script Manager SSH Configuration
+# This file ensures HTTP Injector compatibility
+PasswordAuthentication yes
+PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys
+PermitRootLogin no
+MaxAuthTries 6
+EOF
+    
+    chmod 644 /etc/ssh/sshd_config.d/99-mk-script.conf
+    echo "[*] Created /etc/ssh/sshd_config.d/99-mk-script.conf with PasswordAuthentication yes"
+    
+    # Test SSH configuration
+    echo "[*] Testing SSH configuration..."
+    if sshd -t 2>/dev/null; then
+        echo "[*] SSH configuration test passed"
+        
+        # Restart SSH service
+        systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || service ssh restart 2>/dev/null
+        echo "[*] SSH service restarted successfully"
+        
+        # Verify the setting is active
+        if check_password_auth; then
+            echo "[*] ✅ SSH password authentication successfully enabled"
+        else
+            echo "[*] ⚠️  Warning: PasswordAuthentication may not be active, but config file created"
+        fi
+    else
+        echo "[*] ❌ SSH configuration test failed, removing our config file"
+        rm -f /etc/ssh/sshd_config.d/99-mk-script.conf
+        echo "[*] Falling back to main config file method..."
+        
+        # Fallback: modify main config file
+        if ! grep -q "^PasswordAuthentication" /etc/ssh/sshd_config; then
+            echo "PasswordAuthentication yes" >> /etc/ssh/sshd_config
+        else
+            sed -i 's/^PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+        fi
+        
+        systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || service ssh restart 2>/dev/null
+        echo "[*] Applied fallback configuration"
+    fi
 fi
 
 echo "[*] Applying maximum performance TCP optimizations..."

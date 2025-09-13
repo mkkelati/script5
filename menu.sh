@@ -3119,6 +3119,7 @@ manage_http_injector_config() {
         echo -e "${RED}[${BLUE}5${RED}] ${WHITE}• ${MAGENTA}Regenerate SSL Certificate${RESET}"
         echo -e "${RED}[${BLUE}6${RED}] ${WHITE}• ${RED}Delete Configuration File${RESET}"
         echo -e "${RED}[${BLUE}7${RED}] ${WHITE}• ${YELLOW}Show Setup Instructions${RESET}"
+        echo -e "${RED}[${BLUE}8${RED}] ${WHITE}• ${CYAN}SSH Configuration Diagnostics${RESET}"
         echo -e "${RED}[${BLUE}0${RED}] ${WHITE}• ${YELLOW}Back to Main Menu${RESET}"
         echo ""
         echo -e "\033[0;34m◇────────────────────────────────────────◇${RESET}"
@@ -3400,6 +3401,164 @@ manage_http_injector_config() {
                 echo -e "${WHITE}• Configure your username and password in SSH settings${RESET}"
                 echo ""
                 
+                read -p "Press Enter to continue..." -r
+                ;;
+                
+            8)
+                # SSH Configuration Diagnostics
+                echo -e "${BLUE}🔧 SSH Configuration Diagnostics${RESET}\n"
+                
+                echo -e "${YELLOW}📋 SSH Configuration Analysis:${RESET}\n"
+                
+                # Check main SSH config file
+                echo -e "${WHITE}1. Main SSH Configuration (/etc/ssh/sshd_config):${RESET}"
+                if [[ -f /etc/ssh/sshd_config ]]; then
+                    echo -e "${GREEN}   ✅ File exists${RESET}"
+                    if grep -q "PasswordAuthentication" /etc/ssh/sshd_config; then
+                        echo -e "${BLUE}   📄 PasswordAuthentication settings:${RESET}"
+                        grep -n "PasswordAuthentication" /etc/ssh/sshd_config | sed 's/^/      /'
+                    else
+                        echo -e "${YELLOW}   ⚠️  No PasswordAuthentication setting found${RESET}"
+                    fi
+                else
+                    echo -e "${RED}   ❌ File not found${RESET}"
+                fi
+                echo ""
+                
+                # Check SSH config.d directory
+                echo -e "${WHITE}2. SSH Configuration Directory (/etc/ssh/sshd_config.d/):${RESET}"
+                if [[ -d /etc/ssh/sshd_config.d/ ]]; then
+                    echo -e "${GREEN}   ✅ Directory exists${RESET}"
+                    
+                    local config_files=($(find /etc/ssh/sshd_config.d/ -name "*.conf" 2>/dev/null))
+                    if [[ ${#config_files[@]} -gt 0 ]]; then
+                        echo -e "${BLUE}   📁 Configuration files found:${RESET}"
+                        for config_file in "${config_files[@]}"; do
+                            local filename=$(basename "$config_file")
+                            echo -e "${WHITE}      • $filename${RESET}"
+                            
+                            if [[ -s "$config_file" ]]; then
+                                if grep -q "PasswordAuthentication" "$config_file"; then
+                                    echo -e "${BLUE}        PasswordAuthentication settings:${RESET}"
+                                    grep -n "PasswordAuthentication" "$config_file" | sed 's/^/          /'
+                                else
+                                    echo -e "${GRAY}        (No PasswordAuthentication settings)${RESET}"
+                                fi
+                            else
+                                echo -e "${YELLOW}        (Empty file)${RESET}"
+                            fi
+                        done
+                    else
+                        echo -e "${YELLOW}   ⚠️  No .conf files found${RESET}"
+                    fi
+                else
+                    echo -e "${RED}   ❌ Directory not found${RESET}"
+                fi
+                echo ""
+                
+                # Check SSH service status
+                echo -e "${WHITE}3. SSH Service Status:${RESET}"
+                if systemctl is-active --quiet sshd; then
+                    echo -e "${GREEN}   ✅ SSH service is running${RESET}"
+                elif systemctl is-active --quiet ssh; then
+                    echo -e "${GREEN}   ✅ SSH service is running (ssh)${RESET}"
+                else
+                    echo -e "${RED}   ❌ SSH service is not running${RESET}"
+                fi
+                
+                # Test SSH configuration
+                echo -e "${WHITE}4. SSH Configuration Test:${RESET}"
+                if sshd -t 2>/dev/null; then
+                    echo -e "${GREEN}   ✅ SSH configuration is valid${RESET}"
+                else
+                    echo -e "${RED}   ❌ SSH configuration has errors${RESET}"
+                    echo -e "${YELLOW}   Error details:${RESET}"
+                    sshd -t 2>&1 | sed 's/^/      /'
+                fi
+                echo ""
+                
+                # Check effective SSH configuration
+                echo -e "${WHITE}5. Effective SSH Configuration:${RESET}"
+                echo -e "${BLUE}   Testing what SSH daemon actually uses:${RESET}"
+                
+                # Try to get effective config (this might not work on all systems)
+                if command -v sshd >/dev/null 2>&1; then
+                    local temp_config=$(mktemp)
+                    if sshd -T 2>/dev/null > "$temp_config"; then
+                        if grep -q "passwordauthentication" "$temp_config"; then
+                            local password_auth=$(grep "passwordauthentication" "$temp_config" | awk '{print $2}')
+                            if [[ "$password_auth" == "yes" ]]; then
+                                echo -e "${GREEN}   ✅ PasswordAuthentication: $password_auth${RESET}"
+                            else
+                                echo -e "${RED}   ❌ PasswordAuthentication: $password_auth${RESET}"
+                            fi
+                        else
+                            echo -e "${YELLOW}   ⚠️  PasswordAuthentication setting not found in effective config${RESET}"
+                        fi
+                        
+                        if grep -q "pubkeyauthentication" "$temp_config"; then
+                            local pubkey_auth=$(grep "pubkeyauthentication" "$temp_config" | awk '{print $2}')
+                            echo -e "${BLUE}   📋 PubkeyAuthentication: $pubkey_auth${RESET}"
+                        fi
+                    else
+                        echo -e "${YELLOW}   ⚠️  Cannot retrieve effective SSH configuration${RESET}"
+                    fi
+                    rm -f "$temp_config"
+                else
+                    echo -e "${YELLOW}   ⚠️  sshd command not available for testing${RESET}"
+                fi
+                echo ""
+                
+                # Recommendations
+                echo -e "${WHITE}6. Recommendations:${RESET}"
+                
+                # Check if MK Script config exists
+                if [[ -f /etc/ssh/sshd_config.d/99-mk-script.conf ]]; then
+                    echo -e "${GREEN}   ✅ MK Script SSH configuration file exists${RESET}"
+                    echo -e "${BLUE}   📄 Content:${RESET}"
+                    cat /etc/ssh/sshd_config.d/99-mk-script.conf | sed 's/^/      /'
+                else
+                    echo -e "${YELLOW}   ⚠️  MK Script SSH configuration not found${RESET}"
+                    echo -e "${WHITE}   💡 Recommendation: Re-run the installation script to create it${RESET}"
+                fi
+                echo ""
+                
+                # Quick fix option
+                echo -e "${WHITE}7. Quick Fix Option:${RESET}"
+                read -p "   Would you like to create/update MK Script SSH configuration? (y/N): " fix_ssh
+                
+                if [[ "$fix_ssh" =~ ^[Yy]$ ]]; then
+                    echo -e "${BLUE}   🔧 Creating MK Script SSH configuration...${RESET}"
+                    
+                    # Create the config file
+                    cat > /etc/ssh/sshd_config.d/99-mk-script.conf << 'EOF'
+# MK Script Manager SSH Configuration
+# This file ensures HTTP Injector compatibility
+PasswordAuthentication yes
+PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys
+PermitRootLogin no
+MaxAuthTries 6
+EOF
+                    
+                    chmod 644 /etc/ssh/sshd_config.d/99-mk-script.conf
+                    
+                    # Test configuration
+                    if sshd -t 2>/dev/null; then
+                        echo -e "${GREEN}   ✅ Configuration created and tested successfully${RESET}"
+                        
+                        # Restart SSH
+                        systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || service ssh restart 2>/dev/null
+                        echo -e "${GREEN}   ✅ SSH service restarted${RESET}"
+                    else
+                        echo -e "${RED}   ❌ Configuration test failed, removing file${RESET}"
+                        rm -f /etc/ssh/sshd_config.d/99-mk-script.conf
+                    fi
+                else
+                    echo -e "${YELLOW}   ⚠️  No changes made${RESET}"
+                fi
+                
+                echo ""
                 read -p "Press Enter to continue..." -r
                 ;;
                 
