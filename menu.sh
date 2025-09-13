@@ -706,6 +706,16 @@ create_user() {
     if useradd -m -s "$user_shell" "$username" 2>/dev/null; then
         echo "${username}:${password}" | chpasswd
         
+        # Set proper permissions on user home directory
+        chmod 755 "/home/$username"
+        chown "$username:$username" "/home/$username"
+        
+        # Add user to ssh-allowed groups if they exist
+        if getent group ssh >/dev/null 2>&1; then
+            usermod -a -G ssh "$username"
+            echo -e "${GREEN}✅ Added user to SSH group${RESET}"
+        fi
+        
         # Add to user database
         echo "${username}:${limit}" >> "$USER_LIST_FILE"
         

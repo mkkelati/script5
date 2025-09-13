@@ -150,6 +150,29 @@ echo "[*] Starting stunnel service..."
 systemctl restart stunnel4
 systemctl enable stunnel4
 
+echo "[*] Configuring SSH for password authentication..."
+# Enable SSH password authentication for HTTP Injector compatibility
+if ! grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config; then
+    # Check if PasswordAuthentication is set to no and change it
+    if grep -q "^PasswordAuthentication no" /etc/ssh/sshd_config; then
+        sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+        echo "[*] Changed PasswordAuthentication from no to yes"
+    elif grep -q "^#PasswordAuthentication" /etc/ssh/sshd_config; then
+        sed -i 's/^#PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+        echo "[*] Uncommented and enabled PasswordAuthentication"
+    else
+        # Add PasswordAuthentication yes if not present
+        echo "PasswordAuthentication yes" >> /etc/ssh/sshd_config
+        echo "[*] Added PasswordAuthentication yes to SSH config"
+    fi
+    
+    # Restart SSH service to apply changes
+    systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || service ssh restart 2>/dev/null
+    echo "[*] SSH service restarted with password authentication enabled"
+else
+    echo "[*] SSH password authentication already enabled"
+fi
+
 echo "[*] Applying maximum performance TCP optimizations..."
 # Remove existing entries to prevent duplicates
 sed -i '/net.core.rmem_max/d' /etc/sysctl.conf 2>/dev/null
