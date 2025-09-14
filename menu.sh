@@ -3120,6 +3120,7 @@ manage_http_injector_config() {
         echo -e "${RED}[${BLUE}6${RED}] ${WHITE}• ${RED}Delete Configuration File${RESET}"
         echo -e "${RED}[${BLUE}7${RED}] ${WHITE}• ${YELLOW}Show Setup Instructions${RESET}"
         echo -e "${RED}[${BLUE}8${RED}] ${WHITE}• ${CYAN}SSH Configuration Diagnostics${RESET}"
+        echo -e "${RED}[${BLUE}9${RED}] ${WHITE}• ${RED}Convert SSH Keys to Password Auth${RESET}"
         echo -e "${RED}[${BLUE}0${RED}] ${WHITE}• ${YELLOW}Back to Main Menu${RESET}"
         echo ""
         echo -e "\033[0;34m◇────────────────────────────────────────◇${RESET}"
@@ -3556,6 +3557,236 @@ EOF
                     fi
                 else
                     echo -e "${YELLOW}   ⚠️  No changes made${RESET}"
+                fi
+                
+                echo ""
+                read -p "Press Enter to continue..." -r
+                ;;
+                
+            9)
+                # SSH Key to Password Authentication Conversion
+                clear
+                echo -e "${RED}🔄 SSH Key to Password Authentication Conversion${RESET}\n"
+                
+                echo -e "${YELLOW}⚠️  WARNING: This will completely change your SSH configuration!${RESET}\n"
+                
+                echo -e "${WHITE}This process will:${RESET}"
+                echo -e "${RED}• DISABLE SSH key authentication${RESET}"
+                echo -e "${GREEN}• ENABLE password authentication${RESET}"
+                echo -e "${BLUE}• ENABLE root login with password${RESET}"
+                echo -e "${YELLOW}• BACKUP current SSH configuration${RESET}"
+                echo -e "${CYAN}• RESTART SSH service${RESET}"
+                echo ""
+                
+                # Check current SSH configuration
+                echo -e "${WHITE}📊 Current SSH Configuration:${RESET}"
+                if grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config 2>/dev/null; then
+                    echo -e "${GREEN}   ✅ Password Authentication: ENABLED${RESET}"
+                else
+                    echo -e "${RED}   ❌ Password Authentication: DISABLED${RESET}"
+                fi
+                
+                if grep -q "^PubkeyAuthentication yes" /etc/ssh/sshd_config 2>/dev/null; then
+                    echo -e "${YELLOW}   ⚠️  Key Authentication: ENABLED${RESET}"
+                else
+                    echo -e "${GREEN}   ✅ Key Authentication: DISABLED${RESET}"
+                fi
+                
+                if [[ -f /root/.ssh/authorized_keys ]]; then
+                    local key_count=$(wc -l < /root/.ssh/authorized_keys 2>/dev/null || echo "0")
+                    echo -e "${BLUE}   📋 SSH Keys Found: $key_count${RESET}"
+                else
+                    echo -e "${GRAY}   📋 SSH Keys Found: 0${RESET}"
+                fi
+                echo ""
+                
+                # Check if conversion is needed
+                if grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config 2>/dev/null && grep -q "^PubkeyAuthentication no" /etc/ssh/sshd_config 2>/dev/null; then
+                    echo -e "${GREEN}✅ SSH is already configured for password authentication!${RESET}"
+                    echo -e "${WHITE}No conversion needed. HTTP Injector should work properly.${RESET}"
+                    read -p "Press Enter to continue..." -r
+                    continue
+                fi
+                
+                echo -e "${RED}⚠️  IMPORTANT SECURITY NOTICE:${RESET}"
+                echo -e "${WHITE}• Keep this session open while testing${RESET}"
+                echo -e "${WHITE}• Test new password authentication before closing${RESET}"
+                echo -e "${WHITE}• Original configuration will be backed up${RESET}"
+                echo -e "${WHITE}• You can restore backup if something goes wrong${RESET}"
+                echo ""
+                
+                read -p "Do you want to proceed with SSH conversion? (y/N): " confirm_conversion
+                
+                if [[ ! "$confirm_conversion" =~ ^[Yy]$ ]]; then
+                    echo -e "${YELLOW}⚠️  SSH conversion cancelled${RESET}"
+                    read -p "Press Enter to continue..." -r
+                    continue
+                fi
+                
+                echo -e "\n${BLUE}🚀 Starting SSH Key to Password Conversion...${RESET}\n"
+                
+                # SSH Conversion Functions (embedded in menu)
+                
+                # Function to backup current SSH settings
+                backup_ssh_config_menu() {
+                    echo -e "${BLUE}🔄 Backing up current SSH configuration...${RESET}"
+                    
+                    # Backup SSH config
+                    cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup.$(date +%Y%m%d_%H%M%S)
+                    
+                    # Backup authorized keys if they exist
+                    if [[ -f /root/.ssh/authorized_keys ]]; then
+                        cp /root/.ssh/authorized_keys /root/.ssh/authorized_keys.backup.$(date +%Y%m%d_%H%M%S)
+                        echo -e "${GREEN}✅ SSH keys backed up${RESET}"
+                    fi
+                    
+                    echo -e "${GREEN}✅ SSH configuration backed up${RESET}"
+                }
+                
+                # Function to create password-based SSH config
+                create_password_ssh_config_menu() {
+                    echo -e "${BLUE}🔧 Creating new SSH configuration...${RESET}"
+                    
+                    cat > /etc/ssh/sshd_config << 'EOF'
+# SSH Configuration for MK Script Manager
+Port 22
+Protocol 2
+
+# Authentication
+PasswordAuthentication yes
+PubkeyAuthentication no
+ChallengeResponseAuthentication no
+UsePAM yes
+
+# Root login
+PermitRootLogin yes
+PermitEmptyPasswords no
+
+# Security settings
+MaxAuthTries 3
+MaxSessions 10
+LoginGraceTime 60
+
+# Connection settings
+ClientAliveInterval 300
+ClientAliveCountMax 2
+TCPKeepAlive yes
+
+# Logging
+SyslogFacility AUTH
+LogLevel INFO
+
+# Subsystem
+Subsystem sftp /usr/lib/openssh/sftp-server
+
+# Allow all users by default
+# AllowUsers can be configured per user needs
+
+# Banner (optional)
+# Banner /etc/ssh/banner
+EOF
+
+                    echo -e "${GREEN}✅ New SSH configuration created${RESET}"
+                }
+                
+                # Function to disable SSH key authentication
+                disable_ssh_keys_menu() {
+                    echo -e "${YELLOW}🚫 Disabling SSH key authentication...${RESET}"
+                    
+                    # Move authorized_keys to backup location
+                    if [[ -f /root/.ssh/authorized_keys ]]; then
+                        mv /root/.ssh/authorized_keys /root/.ssh/authorized_keys.disabled
+                        echo -e "${GREEN}✅ SSH keys disabled (moved to .disabled)${RESET}"
+                    fi
+                    
+                    # Remove SSH keys from other users if needed
+                    for user_home in /home/*; do
+                        if [[ -d "$user_home/.ssh" ]]; then
+                            if [[ -f "$user_home/.ssh/authorized_keys" ]]; then
+                                mv "$user_home/.ssh/authorized_keys" "$user_home/.ssh/authorized_keys.disabled"
+                                echo -e "${GREEN}✅ Disabled SSH keys for user: $(basename $user_home)${RESET}"
+                            fi
+                        fi
+                    done
+                }
+                
+                # Function to restore SSH backup if something goes wrong
+                restore_ssh_backup_menu() {
+                    echo -e "${YELLOW}🔄 Restoring SSH configuration backup...${RESET}"
+                    
+                    # Find the most recent backup
+                    local backup_file=$(ls -t /etc/ssh/sshd_config.backup.* 2>/dev/null | head -1)
+                    
+                    if [[ -n "$backup_file" ]]; then
+                        cp "$backup_file" /etc/ssh/sshd_config
+                        
+                        # Restore authorized keys
+                        local key_backup=$(ls -t /root/.ssh/authorized_keys.backup.* 2>/dev/null | head -1)
+                        if [[ -n "$key_backup" ]]; then
+                            cp "$key_backup" /root/.ssh/authorized_keys
+                        fi
+                        
+                        # Restart SSH with original config
+                        systemctl restart sshd 2>/dev/null || service ssh restart 2>/dev/null
+                        
+                        echo -e "${GREEN}✅ SSH configuration restored from backup${RESET}"
+                    else
+                        echo -e "${RED}❌ No backup found!${RESET}"
+                    fi
+                }
+                
+                # Function to apply SSH configuration
+                apply_ssh_config_menu() {
+                    echo -e "${BLUE}🔄 Applying SSH configuration...${RESET}"
+                    
+                    # Test SSH configuration syntax
+                    if sshd -t; then
+                        echo -e "${GREEN}✅ SSH configuration syntax is valid${RESET}"
+                        
+                        # Restart SSH service
+                        if systemctl restart sshd 2>/dev/null || service ssh restart 2>/dev/null; then
+                            echo -e "${GREEN}✅ SSH service restarted successfully${RESET}"
+                            
+                            # Show current SSH status
+                            echo -e "${BLUE}📊 Current SSH configuration:${RESET}"
+                            echo -e "${GREEN}   - Password Authentication: ENABLED${RESET}"
+                            echo -e "${RED}   - Key Authentication: DISABLED${RESET}"
+                            echo -e "${BLUE}   - Root Login: ENABLED${RESET}"
+                            echo -e "${YELLOW}   - SSH Port: $(grep "^Port" /etc/ssh/sshd_config | awk '{print $2}' || echo "22")${RESET}"
+                            
+                        else
+                            echo -e "${RED}❌ Failed to restart SSH service${RESET}"
+                            echo -e "${YELLOW}🔄 Restoring backup configuration...${RESET}"
+                            restore_ssh_backup_menu
+                            return 1
+                        fi
+                    else
+                        echo -e "${RED}❌ SSH configuration has syntax errors${RESET}"
+                        echo -e "${YELLOW}🔄 Restoring backup configuration...${RESET}"
+                        restore_ssh_backup_menu
+                        return 1
+                    fi
+                }
+                
+                # Execute conversion steps
+                if backup_ssh_config_menu && create_password_ssh_config_menu; then
+                    disable_ssh_keys_menu
+                    if apply_ssh_config_menu; then
+                        echo -e "\n${GREEN}🎉 SSH conversion completed successfully!${RESET}"
+                        echo -e "${BLUE}📝 Important notes:${RESET}"
+                        echo -e "${RED}   • SSH keys are now DISABLED${RESET}"
+                        echo -e "${GREEN}   • Password authentication is ENABLED${RESET}"
+                        echo -e "${BLUE}   • Root login with password is ENABLED${RESET}"
+                        echo -e "${YELLOW}   • Original config backed up${RESET}"
+                        echo -e "${CYAN}   • HTTP Injector will now work with username/password!${RESET}"
+                        echo ""
+                        echo -e "${RED}⚠️  IMPORTANT: Test SSH connection before closing this session!${RESET}"
+                    else
+                        echo -e "\n${RED}❌ SSH conversion failed!${RESET}"
+                        echo -e "${YELLOW}Configuration has been restored from backup.${RESET}"
+                    fi
+                else
+                    echo -e "\n${RED}❌ SSH conversion failed during backup/config creation!${RESET}"
                 fi
                 
                 echo ""

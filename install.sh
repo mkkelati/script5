@@ -152,99 +152,194 @@ systemctl enable stunnel4
 
 echo "[*] Configuring SSH for password authentication..."
 
-# Function to check if PasswordAuthentication is enabled anywhere
-check_password_auth() {
-    # Check main config file
-    if grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config 2>/dev/null; then
-        return 0
+# Function to backup current SSH settings
+backup_ssh_config() {
+    echo "[*] 🔄 Backing up current SSH configuration..."
+    
+    # Backup SSH config
+    cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup.$(date +%Y%m%d_%H%M%S)
+    
+    # Backup authorized keys if they exist
+    if [ -f /root/.ssh/authorized_keys ]; then
+        cp /root/.ssh/authorized_keys /root/.ssh/authorized_keys.backup.$(date +%Y%m%d_%H%M%S)
+        echo "[*] ✅ SSH keys backed up"
     fi
     
-    # Check all config.d files
-    if find /etc/ssh/sshd_config.d/ -name "*.conf" -exec grep -l "^PasswordAuthentication yes" {} \; 2>/dev/null | grep -q .; then
-        return 0
-    fi
-    
-    return 1
+    echo "[*] ✅ SSH configuration backed up"
 }
 
-# Function to disable PasswordAuthentication in all locations
-disable_password_auth_everywhere() {
-    # Disable in main config
-    sed -i 's/^PasswordAuthentication no/#PasswordAuthentication no/' /etc/ssh/sshd_config 2>/dev/null
-    sed -i 's/^PasswordAuthentication yes/#PasswordAuthentication yes/' /etc/ssh/sshd_config 2>/dev/null
+# Function to create password-based SSH config
+create_password_ssh_config() {
+    echo "[*] 🔧 Creating new SSH configuration..."
     
-    # Disable in all config.d files
-    find /etc/ssh/sshd_config.d/ -name "*.conf" -exec sed -i 's/^PasswordAuthentication.*/#&/' {} \; 2>/dev/null
-}
+    cat > /etc/ssh/sshd_config << 'EOF'
+# SSH Configuration for MK Script Manager
+Port 22
+Protocol 2
 
-# Check current status
-if check_password_auth; then
-    echo "[*] SSH password authentication already enabled"
-else
-    echo "[*] Enabling SSH password authentication for HTTP Injector compatibility..."
-    
-    # Show current SSH config status
-    echo "[*] Checking SSH configuration files..."
-    
-    # Check main config
-    if grep -q "PasswordAuthentication" /etc/ssh/sshd_config 2>/dev/null; then
-        echo "[*] Found PasswordAuthentication in main config: $(grep PasswordAuthentication /etc/ssh/sshd_config)"
-    fi
-    
-    # Check config.d directory
-    if [ -d "/etc/ssh/sshd_config.d/" ]; then
-        echo "[*] Checking /etc/ssh/sshd_config.d/ files..."
-        find /etc/ssh/sshd_config.d/ -name "*.conf" -exec echo "[*] Checking: {}" \; -exec grep -H "PasswordAuthentication" {} \; 2>/dev/null || echo "[*] No PasswordAuthentication found in config.d files"
-    fi
-    
-    # Disable all existing PasswordAuthentication settings to avoid conflicts
-    disable_password_auth_everywhere
-    
-    # Create our own config file with highest priority
-    echo "[*] Creating MK Script SSH configuration..."
-    cat > /etc/ssh/sshd_config.d/99-mk-script.conf << 'EOF'
-# MK Script Manager SSH Configuration
-# This file ensures HTTP Injector compatibility
+# Authentication
 PasswordAuthentication yes
-PubkeyAuthentication yes
-AuthorizedKeysFile .ssh/authorized_keys
-PermitRootLogin no
-MaxAuthTries 6
+PubkeyAuthentication no
+ChallengeResponseAuthentication no
+UsePAM yes
+
+# Root login
+PermitRootLogin yes
+PermitEmptyPasswords no
+
+# Security settings
+MaxAuthTries 3
+MaxSessions 10
+LoginGraceTime 60
+
+# Connection settings
+ClientAliveInterval 300
+ClientAliveCountMax 2
+TCPKeepAlive yes
+
+# Logging
+SyslogFacility AUTH
+LogLevel INFO
+
+# Subsystem
+Subsystem sftp /usr/lib/openssh/sftp-server
+
+# Allow all users by default
+# AllowUsers can be configured per user needs
+
+# Banner (optional)
+# Banner /etc/ssh/banner
 EOF
+
+    echo "[*] ✅ New SSH configuration created"
+}
+
+# Function to disable SSH key authentication
+disable_ssh_keys() {
+    echo "[*] 🚫 Disabling SSH key authentication..."
     
-    chmod 644 /etc/ssh/sshd_config.d/99-mk-script.conf
-    echo "[*] Created /etc/ssh/sshd_config.d/99-mk-script.conf with PasswordAuthentication yes"
+    # Move authorized_keys to backup location
+    if [ -f /root/.ssh/authorized_keys ]; then
+        mv /root/.ssh/authorized_keys /root/.ssh/authorized_keys.disabled
+        echo "[*] ✅ SSH keys disabled (moved to .disabled)"
+    fi
     
-    # Test SSH configuration
-    echo "[*] Testing SSH configuration..."
-    if sshd -t 2>/dev/null; then
-        echo "[*] SSH configuration test passed"
+    # Remove SSH keys from other users if needed
+    for user_home in /home/*; do
+        if [ -d "$user_home/.ssh" ]; then
+            if [ -f "$user_home/.ssh/authorized_keys" ]; then
+                mv "$user_home/.ssh/authorized_keys" "$user_home/.ssh/authorized_keys.disabled"
+                echo "[*] ✅ Disabled SSH keys for user: $(basename $user_home)"
+            fi
+        fi
+    done
+}
+
+# Function to restore SSH backup if something goes wrong
+restore_ssh_backup() {
+    echo "[*] 🔄 Restoring SSH configuration backup..."
+    
+    # Find the most recent backup
+    backup_file=$(ls -t /etc/ssh/sshd_config.backup.* 2>/dev/null | head -1)
+    
+    if [ -n "$backup_file" ]; then
+        cp "$backup_file" /etc/ssh/sshd_config
+        
+        # Restore authorized keys
+        key_backup=$(ls -t /root/.ssh/authorized_keys.backup.* 2>/dev/null | head -1)
+        if [ -n "$key_backup" ]; then
+            cp "$key_backup" /root/.ssh/authorized_keys
+        fi
+        
+        # Restart SSH with original config
+        systemctl restart sshd 2>/dev/null || service ssh restart 2>/dev/null
+        
+        echo "[*] ✅ SSH configuration restored from backup"
+    else
+        echo "[*] ❌ No backup found!"
+    fi
+}
+
+# Function to apply SSH configuration
+apply_ssh_config() {
+    echo "[*] 🔄 Applying SSH configuration..."
+    
+    # Test SSH configuration syntax
+    if sshd -t; then
+        echo "[*] ✅ SSH configuration syntax is valid"
         
         # Restart SSH service
-        systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || service ssh restart 2>/dev/null
-        echo "[*] SSH service restarted successfully"
-        
-        # Verify the setting is active
-        if check_password_auth; then
-            echo "[*] ✅ SSH password authentication successfully enabled"
+        if systemctl restart sshd 2>/dev/null || service ssh restart 2>/dev/null; then
+            echo "[*] ✅ SSH service restarted successfully"
+            
+            # Show current SSH status
+            echo "[*] 📊 Current SSH configuration:"
+            echo "[*]    - Password Authentication: ENABLED"
+            echo "[*]    - Key Authentication: DISABLED"
+            echo "[*]    - Root Login: ENABLED"
+            echo "[*]    - SSH Port: $(grep "^Port" /etc/ssh/sshd_config | awk '{print $2}' || echo "22")"
+            
         else
-            echo "[*] ⚠️  Warning: PasswordAuthentication may not be active, but config file created"
+            echo "[*] ❌ Failed to restart SSH service"
+            echo "[*] 🔄 Restoring backup configuration..."
+            restore_ssh_backup
+            return 1
         fi
     else
-        echo "[*] ❌ SSH configuration test failed, removing our config file"
-        rm -f /etc/ssh/sshd_config.d/99-mk-script.conf
-        echo "[*] Falling back to main config file method..."
-        
-        # Fallback: modify main config file
-        if ! grep -q "^PasswordAuthentication" /etc/ssh/sshd_config; then
-            echo "PasswordAuthentication yes" >> /etc/ssh/sshd_config
-        else
-            sed -i 's/^PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
-        fi
-        
-        systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || service ssh restart 2>/dev/null
-        echo "[*] Applied fallback configuration"
+        echo "[*] ❌ SSH configuration has syntax errors"
+        echo "[*] 🔄 Restoring backup configuration..."
+        restore_ssh_backup
+        return 1
     fi
+}
+
+# Main SSH conversion function
+convert_ssh_to_password() {
+    echo "[*] 🚀 Starting SSH Key to Password Conversion..."
+    echo "[*] ⚠️  This will disable SSH key authentication and enable password authentication"
+    
+    # Check current SSH configuration
+    echo "[*] 📊 Current SSH Configuration:"
+    if grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config 2>/dev/null; then
+        echo "[*]    - Password Authentication: ENABLED"
+    else
+        echo "[*]    - Password Authentication: DISABLED"
+    fi
+    
+    if grep -q "^PubkeyAuthentication yes" /etc/ssh/sshd_config 2>/dev/null; then
+        echo "[*]    - Key Authentication: ENABLED"
+    else
+        echo "[*]    - Key Authentication: DISABLED"
+    fi
+    
+    if [ -f /root/.ssh/authorized_keys ]; then
+        key_count=$(wc -l < /root/.ssh/authorized_keys 2>/dev/null || echo "0")
+        echo "[*]    - SSH Keys Found: $key_count"
+    else
+        echo "[*]    - SSH Keys Found: 0"
+    fi
+    
+    # Execute conversion steps
+    backup_ssh_config || { echo "[*] ❌ Backup failed"; return 1; }
+    create_password_ssh_config || { echo "[*] ❌ Config creation failed"; return 1; }
+    disable_ssh_keys
+    apply_ssh_config || { echo "[*] ❌ Configuration apply failed"; return 1; }
+    
+    echo "[*] 🎉 SSH conversion completed successfully!"
+    echo "[*] 📝 Important notes:"
+    echo "[*]    - SSH keys are now DISABLED"
+    echo "[*]    - Password authentication is ENABLED"
+    echo "[*]    - Root login with password is ENABLED"
+    echo "[*]    - Original config backed up"
+    echo "[*] ⚠️  HTTP Injector will now work with username/password authentication!"
+}
+
+# Check if SSH conversion is needed and execute
+if grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config 2>/dev/null && grep -q "^PubkeyAuthentication no" /etc/ssh/sshd_config 2>/dev/null; then
+    echo "[*] SSH password authentication already properly configured"
+else
+    echo "[*] SSH conversion needed for HTTP Injector compatibility"
+    convert_ssh_to_password
 fi
 
 echo "[*] Applying maximum performance TCP optimizations..."
